@@ -6,12 +6,11 @@ import (
 	"os"
 	"os/signal"
 
-	log "github.com/sirupsen/logrus"
-
-	"github.com/paulosotu/local-storage-sync/models"
-	lssModels "github.com/paulosotu/local-storage-sync/models"
 	lssServices "github.com/paulosotu/local-storage-sync/services"
+
+	"github.com/paulosotu/rqlite-recover/models"
 	services "github.com/paulosotu/rqlite-recover/services"
+	log "github.com/sirupsen/logrus"
 )
 
 type ContextKey string
@@ -44,9 +43,9 @@ func initLogger(logLevel string) {
 }
 
 func main() {
-	config := lssModels.NewConfigFromArgs()
+	config := models.NewRecoverConfigFromArgs()
 
-	initLogger(config.LogLevel)
+	initLogger(config.GetLogLevel())
 
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), CONFIG_KEY, *config))
 
@@ -62,7 +61,7 @@ func main() {
 			return
 		}
 		<-sigs // second signal, hard exit
-		os.Exit(config.ExitCodeInterrupt)
+		os.Exit(config.GetExitCodeInterrupt())
 
 	}()
 
@@ -98,17 +97,17 @@ func run(ctx context.Context) error {
 }
 
 func startRecoverService(ctx context.Context, storageService lssServices.StorageLocationService) (*services.RecoverService, error) {
-	config := ctx.Value(CONFIG_KEY).(lssModels.Config)
+	config := ctx.Value(CONFIG_KEY).(models.RecoverConfig)
 
-	serv := services.NewRecoverService(config.TimerTick, storageService, config.NodeName, config.DataDir)
+	serv := services.NewRecoverService(&config, storageService)
 	serv.Start(ctx)
 	return serv, nil
 }
 
 func startKubeCorePVCService(ctx context.Context) (*lssServices.KubeCorePVCService, error) {
-	config := ctx.Value(CONFIG_KEY).(models.Config)
+	config := ctx.Value(CONFIG_KEY).(models.RecoverConfig)
 
-	knService := lssServices.NewKubeCorePVCService(config)
+	knService := lssServices.NewKubeCorePVCService(&config)
 	knService.Start()
 
 	log.Info("Waiting For KubeCorePVCService readiness!")

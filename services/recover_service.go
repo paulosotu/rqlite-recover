@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"io/ioutil"
+	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -19,6 +21,13 @@ type RecoverService struct {
 
 	currentNodeName string
 	rootDataPath    string
+
+	podFailReadiness map[string]time.Time
+
+	httpPort string
+	raftPort string
+
+	notReadyTimoutMin uint64
 }
 
 type Recover struct {
@@ -27,12 +36,25 @@ type Recover struct {
 	NonVoter bool   `json:"non_voter"`
 }
 
-func NewRecoverService(tick int, storage services.StorageLocationService, nodeName, dataPath string) *RecoverService {
+type RecoverConfig interface {
+	GetTimerTick() int
+	GetNodeName() string
+	GetDataDir() string
+	GetHttpPort() string
+	GetRaftPort() string
+	GetReadinessTimeoutMin() uint64
+}
+
+func NewRecoverService(cfg RecoverConfig, storage services.StorageLocationService) *RecoverService {
 	return &RecoverService{
-		ticker:          time.NewTicker(time.Duration(tick) * time.Second),
-		storageLocation: storage,
-		currentNodeName: nodeName,
-		rootDataPath:    dataPath,
+		ticker:            time.NewTicker(time.Duration(cfg.GetTimerTick()) * time.Second),
+		storageLocation:   storage,
+		currentNodeName:   cfg.GetNodeName(),
+		rootDataPath:      cfg.GetDataDir(),
+		podFailReadiness:  make(map[string]time.Time),
+		httpPort:          cfg.GetHttpPort(),
+		raftPort:          cfg.GetRaftPort(),
+		notReadyTimoutMin: cfg.GetReadinessTimeoutMin(),
 	}
 }
 
@@ -44,15 +66,9 @@ func (r *RecoverService) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-r.ticker.C:
-				log.Info("coiso")
 				storageLocations, err := r.storageLocation.GetStorageLocations()
 				if err != nil {
 					log.Errorf("Failed to get Storage Locations with error %v", err)
-					continue
-				}
-				nodes, err := r.storageLocation.GetNodes()
-				if err != nil {
-					log.Errorf("Failed to get deamon set nodes with error %v", err)
 					continue
 				}
 				locationsToRecover := make([]models.StoragePodLocation, 0, len(storageLocations))
@@ -61,12 +77,10 @@ func (r *RecoverService) Start(ctx context.Context) {
 						locationsToRecover = append(locationsToRecover, stLocation)
 					}
 				}
-
-				log.Debugf("nodes: %v", nodes)
 				log.Debugf("locations to recover: %v", locationsToRecover)
 				log.Debugf("storageLocations: %v", storageLocations)
 				if len(locationsToRecover) > 0 {
-					r.handleRecovery(locationsToRecover, nodes)
+					r.handleRecovery(ctx, locationsToRecover)
 				}
 				continue
 			}
@@ -78,20 +92,24 @@ func (r *RecoverService) Stop() {
 	r.ticker.Stop()
 }
 
-func buildRecoverData(nodes []models.Node) []Recover {
-	recoverData := make([]Recover, 0, len(nodes))
-	for _, node := range nodes {
+func (r *RecoverService) buildRecoverData(stLocs []models.StoragePodLocation) []Recover {
+	recoverData := make([]Recover, 0, len(stLocs))
+	for _, loc := range stLocs {
 		data := Recover{
-			Id:       node.GetName(),
-			Address:  node.GetIP(),
+			Id:       loc.GetBindPodName(),
+			Address:  loc.GetPodIp() + ":" + r.raftPort,
 			NonVoter: false,
 		}
 		recoverData = append(recoverData, data)
+
+		if _, ok := r.podFailReadiness[data.Id]; !ok {
+			r.podFailReadiness[data.Id] = time.Unix(0, 0)
+		}
 	}
 	return recoverData
 }
 
-func shouldWriteRecoverData(path string, newRecoverData []Recover) (bool, error) {
+func (r *RecoverService) shouldWriteRecoverData(path string, newRecoverData []Recover) (bool, error) {
 	var currentRecoverData []Recover
 
 	filename := filepath.Join(path, "peers.json")
@@ -137,7 +155,43 @@ func shouldWriteRecoverData(path string, newRecoverData []Recover) (bool, error)
 	return false, nil
 }
 
-func (r *RecoverService) handleRecovery(syncList []models.StoragePodLocation, nodes []models.Node) {
+func (r *RecoverService) handleReadiness(ctx context.Context, podId, podIp, httpPort, podDataPath string) error {
+	var req *http.Request
+	var resp *http.Response
+	var err error
+
+	if req, err = http.NewRequestWithContext(ctx, "GET", "http://"+podIp+":"+httpPort+"/readyz", nil); err != nil {
+		log.Errorf("Failed to check readiness due to error on building request: %v", err)
+	} else {
+		resp, err = http.DefaultClient.Do(req)
+	}
+
+	log.Debugf("Checking readiness with request %v", req)
+
+	if err != nil || resp.StatusCode != 200 {
+		if err != nil {
+			log.Warnf("Not ready due to error: %v, %v", err)
+		} else {
+			log.Debugf("RQlite node responded NOT ready: %v, %v", err, resp.StatusCode)
+		}
+		if r.podFailReadiness[podId] == time.Unix(0, 0) {
+			r.podFailReadiness[podId] = time.Now()
+			return nil
+		} else if uint64(math.Ceil(time.Since(r.podFailReadiness[podId]).Minutes())) > r.notReadyTimoutMin {
+			err = os.Remove(filepath.Join(podDataPath, "readyz"))
+			if err != nil {
+				log.Errorf("Failed to remove readyz due to error %v", err)
+				return err
+			}
+		}
+	} else {
+		log.Debugf("RQlite node responded ready: %v", resp.Body)
+		r.podFailReadiness[podId] = time.Unix(0, 0)
+	}
+	return nil
+}
+
+func (r *RecoverService) handleRecovery(ctx context.Context, syncList []models.StoragePodLocation) {
 	root := r.rootDataPath
 
 	if !filepath.IsAbs(r.rootDataPath) {
@@ -148,12 +202,11 @@ func (r *RecoverService) handleRecovery(syncList []models.StoragePodLocation, no
 	for _, st := range syncList {
 		path := root
 		path = filepath.Join(path, st.GetHostDataDirName(), "file", "data", "raft")
-		recoverData := buildRecoverData(nodes)
+		recoverData := r.buildRecoverData(syncList)
 
 		log.Debugf("PATH: %v", path)
-		log.Debugf("Recover: %v", nodes)
 
-		if shouldWrite, err := shouldWriteRecoverData(path, recoverData); shouldWrite {
+		if shouldWrite, err := r.shouldWriteRecoverData(path, recoverData); shouldWrite {
 			if err != nil {
 				log.Errorf("Will re-write recover file due to error %v", err)
 			}
@@ -164,9 +217,12 @@ func (r *RecoverService) handleRecovery(syncList []models.StoragePodLocation, no
 			}
 			if err = os.WriteFile(filepath.Join(path, "peers.json"), b, 0644); err != nil {
 				log.Errorf("Failed to write peers.json due to error %v", err)
+			} else {
+				log.Debugf(string(b))
+				log.Infof("Wrote peers.json to %v", path)
 			}
-			log.Debugf(string(b))
-		}
 
+		}
+		r.handleReadiness(ctx, st.GetBindPodName(), st.GetPodIp(), r.httpPort, path)
 	}
 }
