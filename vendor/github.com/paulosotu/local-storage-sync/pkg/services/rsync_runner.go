@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/paulosotu/local-storage-sync/models"
+	"github.com/paulosotu/local-storage-sync/pkg/models"
 
 	log "github.com/sirupsen/logrus"
 )

@@ -3,7 +3,7 @@ module github.com/paulosotu/rqlite-recover
 go 1.17
 
 require (
-	github.com/paulosotu/local-storage-sync v0.0.0-20220107175109-d40e0e973ebc
+	github.com/paulosotu/local-storage-sync v0.0.0-20220113163054-f972e6283564
 	github.com/sirupsen/logrus v1.8.1
 )
 

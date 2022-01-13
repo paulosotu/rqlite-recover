@@ -44,11 +44,11 @@ github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.2
 ## explicit; go 1.12
 github.com/modern-go/reflect2
-# github.com/paulosotu/local-storage-sync v0.0.0-20220107175109-d40e0e973ebc
+# github.com/paulosotu/local-storage-sync v0.0.0-20220113163054-f972e6283564
 ## explicit; go 1.16
-github.com/paulosotu/local-storage-sync/models
-github.com/paulosotu/local-storage-sync/services
-github.com/paulosotu/local-storage-sync/utils
+github.com/paulosotu/local-storage-sync/pkg/models
+github.com/paulosotu/local-storage-sync/pkg/services
+github.com/paulosotu/local-storage-sync/pkg/utils
 # github.com/sirupsen/logrus v1.8.1
 ## explicit; go 1.13
 github.com/sirupsen/logrus

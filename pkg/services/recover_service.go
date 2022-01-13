@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/paulosotu/local-storage-sync/models"
-	"github.com/paulosotu/local-storage-sync/services"
+	"github.com/paulosotu/local-storage-sync/pkg/models"
+	"github.com/paulosotu/local-storage-sync/pkg/services"
 	log "github.com/sirupsen/logrus"
 )
 

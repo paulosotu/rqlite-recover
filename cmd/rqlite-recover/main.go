@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/signal"
 
-	lssServices "github.com/paulosotu/local-storage-sync/services"
+	lssServices "github.com/paulosotu/local-storage-sync/pkg/services"
 
 	"github.com/paulosotu/rqlite-recover/pkg/models"
 	services "github.com/paulosotu/rqlite-recover/pkg/services"

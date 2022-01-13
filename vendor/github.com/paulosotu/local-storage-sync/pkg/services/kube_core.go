@@ -9,8 +9,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/paulosotu/local-storage-sync/models"
-	"github.com/paulosotu/local-storage-sync/utils"
+	"github.com/paulosotu/local-storage-sync/pkg/models"
+	"github.com/paulosotu/local-storage-sync/pkg/utils"
 
 	corev1 "k8s.io/api/core/v1"
 

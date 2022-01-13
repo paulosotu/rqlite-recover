@@ -3,7 +3,7 @@ package models
 import (
 	"flag"
 
-	syncModel "github.com/paulosotu/local-storage-sync/models"
+	syncModel "github.com/paulosotu/local-storage-sync/pkg/models"
 )
 
 const (
